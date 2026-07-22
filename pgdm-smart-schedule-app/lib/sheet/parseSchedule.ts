@@ -1,6 +1,11 @@
 import type { DaySchedule, SessionSlot, TargetSection } from '@/types/timetable';
 import type { ScheduleEvent } from '@/types/events';
-import { DAY_HEADER_MARKER, SESSION_ORDER, FALLBACK_SESSION_TIMES } from './constants';
+import {
+  DAY_HEADER_MARKER,
+  SESSION_ORDER,
+  FALLBACK_SESSION_TIMES_JUNIOR,
+  FALLBACK_SESSION_TIMES_SENIOR,
+} from './constants';
 import { parseBatchCell } from './matchBatch';
 import { parseDateLabel } from './parseDate';
 import { detectEventCategory, looksLikeSubjectCell, splitCellParts } from './parseCell';
@@ -24,6 +29,27 @@ interface ValidRow {
   isoDate: string;
   dateLabel: string;
   sessionCells: string[];
+}
+
+function parseStartYear(batchPrefix: string): number {
+  const match = batchPrefix.match(/(\d{4})/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+/**
+ * Ranks every batch found by how recently it started — the most
+ * recently started batch is rank 0 ("1st Year" / junior), the one
+ * before it rank 1 ("2nd Year"), and so on. Mirrors the ranking in
+ * lib/schedule/deriveAvailableBatches.ts (duplicated locally, rather
+ * than imported, to keep lib/sheet independent of lib/schedule) — used
+ * here purely to pick the correct year-specific fallback timing when a
+ * batch's own sheet header row can't be found.
+ */
+function rankBatches(batchPrefixes: Iterable<string>): Map<string, number> {
+  const sorted = Array.from(new Set(batchPrefixes)).sort(
+    (a, b) => parseStartYear(b) - parseStartYear(a),
+  );
+  return new Map(sorted.map((batchPrefix, index) => [batchPrefix, index]));
 }
 
 /**
@@ -106,8 +132,14 @@ export function parseSchedule(rows: string[][]): ParsedSchedule {
   }
   const resolveIdentity = buildIdentityResolver(observations);
 
+  const batchRanks = rankBatches(validRows.map((r) => r.batchPrefix));
+
   function timesFor(batchPrefix: string): BatchSessionTimes {
-    return sessionTimesByBatch[batchPrefix] ?? FALLBACK_SESSION_TIMES;
+    const fromHeader = sessionTimesByBatch[batchPrefix];
+    if (fromHeader) return fromHeader;
+
+    const rank = batchRanks.get(batchPrefix) ?? 0;
+    return rank === 0 ? FALLBACK_SESSION_TIMES_JUNIOR : FALLBACK_SESSION_TIMES_SENIOR;
   }
 
   // Pass 2: build the real output.
@@ -141,9 +173,17 @@ export function parseSchedule(rows: string[][]): ParsedSchedule {
       continue;
     }
 
+    const fallbackTimes =
+      (batchRanks.get(batchPrefix) ?? 0) === 0
+        ? FALLBACK_SESSION_TIMES_JUNIOR
+        : FALLBACK_SESSION_TIMES_SENIOR;
+
     const sessions: SessionSlot[] = SESSION_ORDER.map((key, idx) => {
       const cellText = sessionCells[idx];
-      const slotTimes = times[key] ?? FALLBACK_SESSION_TIMES[key];
+      // times[key] covers the normal case; the fallback here only kicks
+      // in if a header row exists but is missing this one specific slot
+      // (e.g. a blank/unparseable cell for just one session).
+      const slotTimes = times[key] ?? fallbackTimes[key];
 
       const keywordCategory = detectEventCategory(cellText);
       const isCatchAllEvent =
