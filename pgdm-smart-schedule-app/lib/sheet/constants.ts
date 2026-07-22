@@ -4,14 +4,20 @@
  * app can be re-pointed at a new term/batch by editing this file
  * or the equivalent env vars, without touching parsing code.
  *
- * Nothing here hardcodes a specific batch, subject list, or timing
- * grid — those are all read live from the sheet itself:
+ * Nothing here hardcodes a specific batch or subject list — those are
+ * read live from the sheet itself:
  *   - Batches: lib/sheet/matchBatch.ts
  *   - Subjects: lib/sheet/resolveSubjectIdentity.ts (cross-references
  *     the sheet's own data to tell a genuine subject-code qualifier
  *     apart from a redundant section tag — no fixed subject list)
- *   - Session times: lib/sheet/parseSessionTimeHeaders.ts (reads each
- *     batch's own "Session No. - PGDM YYYY-YY" header + Time row)
+ *   - Session times: lib/sheet/parseSessionTimeHeaders.ts tries to read
+ *     each batch's own "Session No. - PGDM YYYY-YY" header + Time row
+ *     first. If that row isn't found/formatted as expected for a given
+ *     batch, lib/sheet/parseSchedule.ts falls back to the year-rank-based
+ *     defaults below — junior (1st year) gets FALLBACK_SESSION_TIMES_JUNIOR,
+ *     everyone senior to that gets FALLBACK_SESSION_TIMES_SENIOR — so
+ *     the two years never show identical/wrong times even when the
+ *     sheet's header row can't be matched for some reason.
  */
 
 export const TARGET_SECTIONS = ['A', 'B', 'C'] as const;
@@ -39,14 +45,27 @@ export const EVENT_KEYWORDS = [
 ];
 
 /**
- * Pure safety net: used ONLY if a batch has no "Session No. - PGDM
- * YYYY-YY" header row of its own in the sheet at all (so a brand new
- * batch added to the "Batch and Section" column before anyone's gotten
- * around to adding its header row doesn't show broken/blank times).
- * This is not treated as real data anywhere — every batch that has a
- * header row uses its own actual times instead of this.
+ * Used for the most recently started batch (rank 0 — "1st Year" /
+ * junior) whenever its own sheet header row isn't found or doesn't
+ * parse. Edit these directly if the junior timing changes.
  */
-export const FALLBACK_SESSION_TIMES: Record<string, { start: string; end: string }> = {
+export const FALLBACK_SESSION_TIMES_JUNIOR: Record<string, { start: string; end: string }> = {
+  I: { start: '08:30', end: '10:00' },
+  II: { start: '10:15', end: '11:45' },
+  III: { start: '12:00', end: '13:30' },
+  LUNCH: { start: '13:30', end: '14:30' },
+  IV: { start: '14:30', end: '16:00' },
+  V: { start: '16:15', end: '17:45' },
+  VI: { start: '18:00', end: '19:30' },
+};
+
+/**
+ * Used for every batch other than the most recently started one (rank 1
+ * and beyond — "2nd Year" and senior) whenever its own sheet header row
+ * isn't found or doesn't parse. Edit these directly if senior timing
+ * changes.
+ */
+export const FALLBACK_SESSION_TIMES_SENIOR: Record<string, { start: string; end: string }> = {
   I: { start: '09:00', end: '10:30' },
   II: { start: '10:45', end: '12:15' },
   III: { start: '12:30', end: '14:00' },
